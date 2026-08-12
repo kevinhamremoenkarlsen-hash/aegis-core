@@ -1,511 +1,508 @@
-Aegis Core — Capability System
+Aegis Core — Inter-Process Communication (IPC)
 
 1. Purpose
 
-The capability system is the primary authority and access-control mechanism of Aegis Core.
+IPC is the primary communication mechanism between isolated components in Aegis Core and Altis OS.
 
-A capability represents explicit authority to operate on a specific kernel object.
+Aegis Core should provide a small, deterministic IPC mechanism while leaving higher-level communication protocols to userspace.
 
-The fundamental security principle is:
+The design is inspired by capability-oriented microkernels such as seL4.
 
-Possession of a valid capability is required to exercise the corresponding authority.
+Core principles:
 
-Aegis Core follows a capability-oriented architecture inspired by seL4. The implementation is independent and must establish its own security properties.
+Explicit communication authority
 
-2. Security Goals
-
-The capability system must provide:
-
-Explicit authority
-
-Least privilege
+Capability-controlled endpoints
 
 Strong isolation
 
-No ambient authority
+Minimal kernel work
 
-Controlled authority transfer
+Deterministic behavior
 
-Controlled authority duplication
+Safe blocking and wake-up
 
-Capability revocation
+Optional capability transfer
 
-Object lifetime safety
+No implicit global communication channels
 
-Separation between object identity and authority
+2. IPC Architecture
 
-Deterministic permission checking
+┌──────────────────┐
+│   Process A      │
+│                  │
+│ Endpoint Cap     │
+└────────┬─────────┘
+         │
+         │ IPC
+         ▼
+┌──────────────────┐
+│    Aegis Core    │
+│                  │
+│ Validate Cap     │
+│ Validate Rights  │
+│ Transfer Data    │
+│ Block / Wake     │
+└────────┬─────────┘
+         │
+         │ IPC
+         ▼
+┌──────────────────┐
+│   Process B      │
+│                  │
+│ Endpoint Cap     │
+└──────────────────┘
 
-A userspace process must not gain kernel-object authority merely by knowing an object identifier or memory address.
+The kernel provides the transport mechanism. Userspace services define what messages mean.
 
-3. Basic Model
+3. Security Model
 
-                 Capability
-                     │
-          ┌──────────┼──────────┐
-          ▼          ▼          ▼
-       Object       Rights    Metadata
-       reference              / state
-          │
-          ▼
-    Kernel Object
+IPC must be capability controlled.
 
-A capability should conceptually contain or reference:
+A process cannot communicate with an endpoint merely because it knows an identifier.
 
-Capability
-├── Object reference
-├── Object type
-├── Rights
-├── Derivation information
-└── Capability state
+Incorrect:
 
-The exact internal representation is an implementation detail and must not expose privileged kernel information to userspace.
+Endpoint ID
+    │
+    ▼
+Access endpoint
 
-4. Authority Model
+Correct:
 
-Authority flows explicitly.
-
-Root / Initial Authority
-          │
-          ▼
-      Capability
-          │
-       ┌──┴──┐
-       ▼     ▼
-     Copy   Mint
-       │     │
-       ▼     ▼
-     Child  Restricted Child
-
-Authority must never appear spontaneously.
-
-The kernel is responsible for ensuring that every capability operation is authorized by an existing capability.
-
-5. Capability Rights
-
-Rights describe what operations a capability permits.
-
-Example generic rights:
-
-Read
-Write
-Execute
-Map
-Grant
-Send
-Receive
-Reply
-Control
-Manage
-
-Not every object type supports every right.
-
-For example:
-
-Frame
-├── Read
-├── Write
-├── Execute
-└── Map
-
-An endpoint might instead support:
-
-Endpoint
-├── Send
-├── Receive
-└── Grant
-
-The kernel must reject rights that are invalid for a particular object type.
-
-6. Rights Reduction
-
-A capability may be derived with fewer rights than its parent.
-
-Example:
-
-Original:
-Read + Write + Execute
-
+Endpoint Capability
         │
         ▼
+Validate capability
+        │
+        ▼
+Validate IPC rights
+        │
+        ▼
+Access endpoint
 
-Derived:
-Read + Write
+The capability system therefore forms the security boundary for IPC.
 
-A derived capability must never gain a right that was absent from the source capability.
+4. IPC Primitives
 
-Formally:
+Initial primitives:
 
-rights(child) ⊆ rights(parent)
+Send
+Receive
+Call
+Reply
+Notify
+Wait
+Poll
+Cancel
 
-unless an explicitly privileged kernel operation defines another safe rule.
-
-7. Capability Spaces
-
-Each protected execution environment should have an isolated capability space.
-
-A capability space stores references to capabilities available to that execution environment.
-
-Conceptually:
-
-Process
-   │
-   ▼
-CNode / Capability Space
-   │
-   ├── Slot 0 → Endpoint capability
-   ├── Slot 1 → Frame capability
-   ├── Slot 2 → Thread capability
-   └── Slot 3 → VSpace capability
-
-A process should normally interact with capabilities through handles or capability slots rather than raw kernel object addresses.
-
-8. Capability Slots
-
-A slot stores one capability.
-
-CNode
-├── Slot 0
-├── Slot 1
-├── Slot 2
-├── Slot 3
-└── ...
-
-A slot should have a well-defined state:
-
-Empty
-Occupied
-
-The kernel must validate the slot before performing an operation.
-
-An invalid slot must produce a controlled failure rather than undefined behavior.
-
-9. CNodes
-
-A CNode is a kernel object used to organize capability slots.
+The exact syscall interface may change during implementation.
 
 Conceptually:
 
-CNode
-│
-├── Slot 0
-├── Slot 1
-├── Slot 2
-│
-└── CNode
-     ├── Slot 0
-     └── Slot 1
+Send    → transmit a message
+Receive → wait for a message
+Call    → send and wait for a reply
+Reply   → answer a call
+Notify  → signal an event
+Wait    → block until an event/message
+Poll    → check without blocking
+Cancel  → cancel a supported blocked operation
 
-Hierarchical CNodes can provide scalable capability addressing.
+The kernel should avoid adding high-level protocol semantics.
 
-Aegis Core should define:
+5. Endpoints
 
-Slot indexing
+An endpoint is a kernel object used for synchronous message communication.
 
-CNode size
+Endpoint
+├── Waiting senders
+├── Waiting receivers
+├── State
+└── Synchronization data
 
-CNode creation
-
-CNode destruction
-
-Nested CNodes
-
-Lookup rules
-
-Authority required for CNode operations
-
-10. Capability Lookup
-
-A capability lookup should be deterministic.
-
-Conceptual flow:
-
-Userspace capability handle
-            │
-            ▼
-       Capability lookup
-            │
-            ▼
-       Validate slot
-            │
-            ▼
-       Validate object
-            │
-            ▼
-       Validate rights
-            │
-            ▼
-       Perform operation
-
-The kernel must never trust a userspace-provided pointer as proof of authority.
-
-11. Capability Creation
-
-Capabilities should normally originate from existing authority.
-
-Conceptual operation:
-
-Source capability
-       │
-       ▼
-   Validate source
-       │
-       ▼
-   Create/derive authority
-       │
-       ▼
-Destination slot
-
-The kernel must verify:
-
-The source capability exists.
-
-The source capability is valid.
-
-The caller has the required authority.
-
-The destination slot is valid.
-
-The resulting rights are permitted.
-
-The operation preserves capability invariants.
-
-12. Copy
-
-Copying creates another capability referring to the same underlying object.
-
-Capability A
-     │
-     │ copy
-     ▼
-Capability B
-     │
-     └──────► Same object
-
-The copy should preserve only rights that the operation is allowed to preserve.
+An endpoint is accessed through a capability.
 
 Example:
-
-A: Read + Write
-
-copy(A) → B: Read + Write
-
-Copying does not duplicate the underlying kernel object.
-
-13. Mint
-
-Minting creates a derived capability with explicitly restricted authority.
-
-Parent Capability
-       │
-       ▼
-      Mint
-       │
-       ▼
-Restricted Capability
-
-Example:
-
-Parent:
-Read + Write + Execute
-
-Mint:
-Read + Write
-
-The child must not exceed the authority available from the parent and the minting operation.
-
-14. Move
-
-Moving transfers a capability from one slot to another.
-
-Slot A
-  │
-  │ move
-  ▼
-Slot B
-
-After a successful move:
-
-Slot A → Empty
-Slot B → Capability
-
-The operation must be atomic from the perspective of concurrent kernel execution.
-
-15. Delete
-
-Deleting removes a capability from a capability slot.
-
-Before:
-
-Slot 4 → Capability
-
-Delete
-
-After:
-
-Slot 4 → Empty
-
-Deleting a capability does not necessarily destroy the underlying object.
-
-Other capabilities may still reference that object.
-
-16. Revocation
-
-Revocation removes authority derived from a particular capability.
-
-This requires capability derivation information or another formally defined mechanism.
-
-Conceptually:
-
-                 Root Capability
-                       │
-              ┌────────┼────────┐
-              ▼        ▼        ▼
-            Child A  Child B  Child C
-              │
-              ▼
-           Child A2
-
-Revoking the appropriate authority should invalidate the intended descendants according to the capability derivation rules.
-
-The exact revocation algorithm must be specified and tested carefully.
-
-17. Capability Derivation Tree
-
-Aegis Core should maintain a derivation relationship between capabilities when required for safe revocation.
-
-Example:
-
-Root
-├── A
-│   ├── A1
-│   └── A2
-└── B
-    ├── B1
-    └── B2
-
-This allows the kernel to reason about where authority originated.
-
-The derivation structure must not allow a child capability to become more powerful than its ancestors.
-
-18. Object Lifetime
-
-Capabilities and kernel objects have different lifetimes.
-
-Example:
-
-Capability A ─┐
-Capability B ─┼──► Object
-Capability C ─┘
-
-Deleting Capability A must not destroy the object while B or C still holds valid authority.
-
-The object may become reclaimable when no valid references remain and the kernel determines that destruction is safe.
-
-Object lifetime rules must prevent:
-
-Use-after-free
-
-Dangling capabilities
-
-Stale references
-
-Double destruction
-
-Unauthorized resurrection
-
-19. Capability and Object Identity
-
-Userspace must not be able to turn an arbitrary object identifier into authority.
-
-Incorrect model:
-
-Object ID
-   │
-   ▼
-Access object
-
-Correct model:
-
-Capability
-   │
-   ▼
-Validated authority
-   │
-   ▼
-Access object
-
-Object identifiers may exist internally, but knowledge of an identifier alone must not grant access.
-
-20. IPC Capabilities
-
-IPC endpoints should be protected by capabilities.
 
 Process A
    │
-   └── Send capability
-           │
-           ▼
-        Endpoint
-           ▲
-           │
-   ┌───────┘
+   └── Send Capability
+             │
+             ▼
+          Endpoint
+             ▲
+             │
+   ┌─────────┘
    │
 Process B
-   └── Receive capability
-
-The kernel checks the appropriate capability before allowing communication.
-
-Capabilities may also be transferred through IPC where the protocol and rights permit it.
-
-21. Capability Transfer
-
-Capability transfer should be explicit.
-
-Process A
    │
-   │ IPC + capability
+   └── Receive Capability
+
+Different capabilities may provide different rights.
+
+6. Endpoint Rights
+
+Possible endpoint rights:
+
+Send
+Receive
+Call
+Grant
+Control
+
+Example:
+
+Client:
+Send + Call
+
+Server:
+Receive + Reply
+
+The exact right model should be finalized together with the capability specification.
+
+7. Synchronous IPC
+
+Aegis Core should initially prioritize synchronous IPC.
+
+Basic flow:
+
+Sender
+   │
+   │ Send
+   ▼
+Endpoint
+   │
+   │ Receiver available?
+   ├──── Yes ────► Transfer message
+   │
+   └──── No ─────► Block sender
+
+Receiver:
+
+Receiver
+   │
+   │ Receive
+   ▼
+Endpoint
+   │
+   │ Sender waiting?
+   ├──── Yes ────► Transfer message
+   │
+   └──── No ─────► Block receiver
+
+This minimizes kernel buffering and makes ownership explicit.
+
+8. Direct Handoff
+
+Where possible, IPC should support direct transfer between sender and receiver without unnecessary intermediate buffering.
+
+Sender
+   │
+   │ Message
    ▼
 Kernel
    │
+   │ Direct transfer
    ▼
-Process B
+Receiver
 
-The kernel must validate:
+This can reduce:
 
-Sender authority
+Memory copying
 
-Destination
+Kernel storage
 
-Capability validity
+Latency
 
-Transfer rights
+Complexity
 
-Destination slot
+The implementation must still validate every boundary crossing.
 
-Rights being transferred
+9. Message Structure
 
-A sender must not be able to transfer authority it does not possess.
+A basic IPC message may contain:
 
-22. Memory Capabilities
-
-Physical memory should be represented by capabilities.
+Message
+├── Message label
+├── Payload words
+├── Capability transfer metadata
+└── Length
 
 Conceptually:
 
-Memory Authority
+┌──────────────┬──────────┬───────────────┬────────┐
+│ Label        │ Length   │ Payload       │ Caps   │
+└──────────────┴──────────┴───────────────┴────────┘
+
+The kernel should keep the generic message format small.
+
+Userspace protocols can define the meaning of labels and payloads.
+
+10. Message Labels
+
+A message label identifies the requested operation or protocol.
+
+Example:
+
+FILE_OPEN
+FILE_READ
+FILE_WRITE
+PROCESS_CREATE
+DEVICE_REQUEST
+NETWORK_SEND
+
+These labels should normally be defined by userspace protocols rather than hard-coded into the microkernel.
+
+The kernel only transports the label.
+
+11. Payload
+
+The payload contains protocol data.
+
+Conceptually:
+
+Message
+├── label
+├── payload[0]
+├── payload[1]
+├── payload[2]
+└── ...
+
+The kernel must validate:
+
+Message size
+
+Address validity
+
+Buffer accessibility
+
+Alignment where required
+
+Capability transfer metadata
+
+The kernel must never trust userspace pointers.
+
+12. Call and Reply
+
+A call combines sending a request with waiting for a reply.
+
+Client
+   │
+   │ Call
+   ▼
+Server
+   │
+   │ Reply
+   ▼
+Client
+
+Typical service interaction:
+
+Application
+     │
+     │ Call(FILE_OPEN)
+     ▼
+Filesystem Service
+     │
+     │ Reply(handle)
+     ▼
+Application
+
+The kernel manages the synchronization mechanism; the service defines the protocol.
+
+13. Reply Objects
+
+A reply object can represent authority to respond to a specific call.
+
+Conceptually:
+
+Client
+   │
+   │ Call
+   ▼
+Server
+   │
+   └── Reply capability
+            │
+            ▼
+          Client
+
+Reply authority must be isolated so that one service cannot arbitrarily reply to another process's outstanding call.
+
+14. Notifications
+
+Notifications provide lightweight event signaling.
+
+Producer
+   │
+   │ Notify
+   ▼
+Notification Object
+   │
+   │ Wake
+   ▼
+Consumer
+
+Notifications are useful for:
+
+Interrupt delivery
+
+Timers
+
+Device events
+
+Scheduler events
+
+Lightweight synchronization
+
+A notification normally carries less information than a full IPC message.
+
+15. Interrupt + IPC
+
+Hardware interrupts can eventually be converted into userspace-visible notifications.
+
+Hardware
+   │
+   ▼
+CPU IRQ
+   │
+   ▼
+Aegis Core
+   │
+   ▼
+IRQ Capability
+   │
+   ▼
+Notification
+   │
+   ▼
+Userspace Driver
+
+This allows many drivers to remain outside the kernel.
+
+16. Blocking
+
+IPC operations may block when the requested counterpart is unavailable.
+
+Example:
+
+Receive
+   │
+   ├── Message available
+   │       │
+   │       ▼
+   │     Return
+   │
+   └── No message
+           │
+           ▼
+        Block thread
+
+A blocked thread should not consume CPU time.
+
+The scheduler moves it out of the runnable state until the required event occurs.
+
+17. Wake-Up
+
+When the required IPC event occurs:
+
+Blocked Thread
+      │
+      │ IPC event
+      ▼
+Wake-up
       │
       ▼
-    Frame
+Ready Queue
       │
-      ├── Read
-      ├── Write
-      ├── Execute
-      └── Map
+      ▼
+Scheduler
 
-A process can map memory only when it possesses the necessary authority.
+Wake-up operations must be race-safe.
 
-This enables explicit memory sharing:
+The implementation must prevent:
+
+Lost wake-ups
+
+Double wake-ups
+
+Invalid thread state transitions
+
+Use-after-free
+
+18. IPC State Machine
+
+A thread performing IPC may have states such as:
+
+Running
+   │
+   ▼
+IPC Operation
+   │
+   ├── Completed ──► Running
+   │
+   └── Blocked ────► Blocked on IPC
+                         │
+                         ▼
+                       Wake
+                         │
+                         ▼
+                       Ready
+                         │
+                         ▼
+                      Running
+
+Only valid transitions should be permitted.
+
+19. Capability Transfer
+
+IPC may optionally transfer capabilities.
+
+Process A
+   │
+   │ Message + Capability
+   ▼
+Aegis Core
+   │
+   │ Validate transfer
+   ▼
+Process B
+
+The sender must possess the necessary transfer/grant authority.
+
+The destination must have a valid capability slot.
+
+The kernel must ensure that the transferred authority does not exceed the sender's allowed authority.
+
+20. Capability Transfer Example
+
+Server
+   │
+   ├── Endpoint capability
+   └── Frame capability
+          │
+          │ IPC transfer
+          ▼
+Client
+   │
+   └── Receives restricted Frame capability
+
+Example:
+
+Server rights:
+Read + Write
+
+Transferred rights:
+Read
+
+The receiving process must not receive more authority than allowed by the transfer operation.
+
+21. Shared Memory IPC
+
+Large data should not necessarily be copied through IPC messages.
+
+Instead:
 
 Process A
    │
@@ -517,306 +514,440 @@ Shared Frame
    │
 Process B
 
-23. Thread Capabilities
+The IPC message can carry a capability or reference to an explicitly shared memory object.
 
-Threads should also be represented by capabilities.
+This can support efficient:
 
-Possible rights:
+File transfers
 
-Thread
-├── Inspect
-├── Control
-├── Suspend
-├── Resume
-└── Configure
+Network buffers
 
-A process should not be able to control another thread without the corresponding authority.
+Graphics buffers
 
-24. Address-Space Capabilities
+Large data structures
 
-An address space can be represented by a capability.
+Device buffers
 
-Possible authority:
+Shared memory must remain explicitly authorized.
 
-VSpace
-├── Read metadata
-├── Map
-├── Unmap
-├── Configure
-└── Destroy
+22. Copying vs Shared Memory
 
-The exact rights must be constrained to prevent privilege escalation.
+Small messages:
 
-25. IRQ Capabilities
+Process A
+    │
+    │ small IPC message
+    ▼
+Process B
 
-Interrupt authority should also be explicit.
+Large data:
 
-IRQ capability
-      │
-      ▼
-IRQ object
-      │
-      ▼
-Authorized handler
+Process A ──► Shared Memory ◄── Process B
+       │                         │
+       └──── IPC metadata ───────┘
 
-A userspace driver must not receive arbitrary hardware interrupts without the corresponding capability.
+The kernel should not unnecessarily copy large buffers.
 
-26. Capability Errors
+23. IPC and Memory Safety
 
-Capability operations should return controlled error results.
+Userspace pointers must be treated as untrusted.
+
+Before accessing userspace memory, the kernel must ensure that:
+
+The address belongs to the caller's address space.
+
+The memory is mapped.
+
+Required permissions exist.
+
+The range is valid.
+
+Integer overflow cannot bypass bounds checks.
+
+The operation cannot access kernel memory.
+
+Invalid buffers must result in controlled errors.
+
+24. IPC Errors
 
 Possible errors:
 
+InvalidEndpoint
 InvalidCapability
-InvalidSlot
-InvalidObject
 InsufficientRights
-InvalidOperation
-SlotOccupied
-SlotEmpty
-Revoked
-ObjectDestroyed
-InvalidTransfer
+InvalidMessage
+InvalidBuffer
+MessageTooLarge
+InvalidCapabilityTransfer
+InvalidSlot
+EndpointClosed
+ThreadStateError
+OperationCancelled
+Timeout
 
-Errors must never expose privileged memory or kernel implementation details unnecessarily.
+Errors must not expose privileged kernel state.
 
-27. Concurrency
+25. Timeouts
 
-Capability operations may occur concurrently on multi-core systems.
+Timeouts may be added after the basic IPC model is stable.
 
-The implementation must preserve:
+Conceptually:
 
-Slot consistency
+Receive(timeout)
+      │
+      ├── Message arrives
+      │       └── Success
+      │
+      └── Timeout expires
+              └── Timeout error
+
+Timeout implementation should integrate with the kernel timer and scheduler rather than creating an independent timing system.
+
+26. Cancellation
+
+Blocked IPC operations may eventually support cancellation.
+
+Thread
+   │
+   ▼
+Blocked on IPC
+   │
+   │ Cancel
+   ▼
+Ready / Error
+
+Cancellation semantics must be carefully specified to prevent races between:
+
+Message arrival
+Wake-up
+Cancellation
+Thread destruction
+Endpoint destruction
+
+27. Endpoint Lifetime
+
+Endpoints are kernel objects protected by capabilities.
+
+Example:
+
+Capability A ─┐
+Capability B ─┼──► Endpoint
+Capability C ─┘
+
+Deleting one capability must not destroy the endpoint while valid capabilities remain.
+
+Endpoint destruction must safely handle waiting threads.
+
+Possible policy:
+
+Endpoint destroyed
+       │
+       ├── Wake waiting senders
+       └── Wake waiting receivers
+
+The exact error returned must be defined by the IPC specification.
+
+28. Concurrency
+
+IPC must work correctly on multi-core systems.
+
+Important synchronization requirements:
+
+Endpoint queue consistency
+
+Atomic state transitions
+
+Safe thread wake-up
+
+Capability transfer consistency
 
 Object lifetime safety
 
-Derivation-tree integrity
+No lost wake-ups
 
-Revocation correctness
+No double enqueue
 
-Atomic transfer semantics
+No use-after-free
 
-Capability-right invariants
+The implementation should avoid unnecessary global locks.
 
-Synchronization mechanisms must themselves be designed to avoid deadlocks and races.
+29. Priority and IPC
 
-28. Security Invariants
+IPC interacts with scheduling.
 
-The following invariants are fundamental.
+A future implementation may need to account for priority inversion.
 
-Invariant 1 — No fabricated authority
+Example:
 
-A process cannot create arbitrary valid capabilities without authorized kernel operations.
+High-priority client
+        │
+        ▼
+Low-priority server
+        │
+        ▼
+High-priority client blocked
 
-Invariant 2 — Rights cannot increase
+Possible future mechanisms include priority inheritance or priority donation.
 
-A derived capability cannot have more authority than permitted by its source.
+These should only be added after the basic scheduler and IPC model are stable and formally specified.
 
-child_rights ⊆ permitted(parent_rights)
+30. IPC Security Rules
 
-Invariant 3 — Isolation
+Rule 1 — No capability, no IPC
 
-A capability belonging to one protection domain must not automatically become available to another.
+A process requires valid endpoint authority.
 
-Invariant 4 — Valid object reference
+Rule 2 — No implicit channels
 
-Every live capability must reference a valid kernel object.
+Communication channels must be explicitly established.
 
-Invariant 5 — Safe destruction
+Rule 3 — Validate every message
 
-Destroying an object must not leave usable capabilities referencing reclaimed memory.
+All userspace input is untrusted.
 
-Invariant 6 — Revocation correctness
+Rule 4 — Validate transferred capabilities
 
-Revocation must remove exactly the authority defined by the revocation semantics.
+Capability transfer must be authorized.
 
-Invariant 7 — Explicit transfer
+Rule 5 — Preserve isolation
 
-Authority must cross protection boundaries only through an authorized mechanism.
+IPC must not provide unintended access to another process's memory.
 
-29. Threat Model
+Rule 6 — Protect kernel memory
 
-The capability system must assume that userspace code may be malicious or compromised.
+Userspace IPC cannot directly expose kernel memory.
 
-Userspace may attempt:
+Rule 7 — Preserve object lifetime
 
-Forged handles
-Invalid object IDs
-Invalid pointers
-Unauthorized capability operations
-Rights escalation
-Capability reuse
-Race conditions
-Double deletion
-Invalid IPC transfers
+Waiting threads and endpoints must remain valid during IPC operations.
 
-The kernel must treat all userspace input as untrusted.
+Rule 8 — Atomic state transitions
 
-30. Rust Safety Requirements
+Concurrent IPC operations must preserve kernel invariants.
 
-The capability implementation should use Rust's type and ownership system wherever practical.
+31. IPC Protocol Example
 
-Security-critical unsafe code should be minimized.
+A userspace filesystem service could define:
 
-Every unsafe block must have:
+Client
+   │
+   │ Call(FILE_OPEN, "/file")
+   ▼
+Filesystem Service
+   │
+   │ Reply(file_cap)
+   ▼
+Client
 
-A documented safety invariant
+Later:
 
-A clear reason for requiring unsafe
+Client
+   │
+   │ Call(FILE_READ, file_cap, buffer)
+   ▼
+Filesystem Service
+   │
+   │ IPC with storage service
+   ▼
+Storage Driver
+   │
+   │ Reply(data)
+   ▼
+Filesystem Service
+   │
+   │ Reply(bytes_read)
+   ▼
+Client
 
-Validity assumptions
+Aegis Core only provides the IPC mechanism and authority checks.
 
-Tests covering important boundary cases
-
-The capability implementation must not rely on undefined behavior for security.
-
-31. Suggested Module Structure
+32. Suggested Rust Module Structure
 
 kernel/src/
-└── capability/
+└── ipc/
     ├── mod.rs
-    ├── cap.rs
-    ├── rights.rs
-    ├── cnode.rs
-    ├── slot.rs
-    ├── lookup.rs
-    ├── derive.rs
-    ├── revoke.rs
+    ├── message.rs
+    ├── endpoint.rs
+    ├── notification.rs
+    ├── reply.rs
+    ├── send.rs
+    ├── receive.rs
+    ├── call.rs
     ├── transfer.rs
-    └── error.rs
+    ├── blocking.rs
+    ├── wake.rs
+    ├── error.rs
+    └── tests.rs
 
 Possible future modules:
 
-    ├── tree.rs
-    ├── object.rs
-    ├── authority.rs
-    └── tests.rs
+    ├── timeout.rs
+    ├── cancel.rs
+    ├── shared_memory.rs
+    └── priority.rs
 
-The exact structure may change as the implementation develops.
+The exact structure may change as implementation develops.
 
-32. Testing Strategy
+33. Syscall Layer
 
-Capability testing should include:
+The syscall layer should expose a minimal IPC interface.
 
-Basic tests
+Conceptual interface:
 
-Create capability
+sys_send()
+sys_receive()
+sys_call()
+sys_reply()
+sys_notify()
+sys_wait()
 
-Copy capability
+Capability handles should be passed as arguments.
 
-Move capability
+Example:
 
-Delete capability
+sys_call(endpoint_cap, message)
 
-Lookup capability
+The syscall layer validates the capability before entering the IPC subsystem.
 
-Rights tests
+34. Testing Strategy
 
-Valid operation
+Endpoint tests
 
-Missing right
+Create endpoint
 
-Reduced rights
+Send
 
-Invalid right/object combinations
+Receive
 
-Revocation tests
+Call
 
-Revoke parent
+Reply
 
-Revoke descendants
+Destroy endpoint
 
-Preserve unrelated branches
+Blocking tests
 
-Verify invalidated capabilities cannot be used
+Block sender
 
-Lifetime tests
+Block receiver
 
-Destroy object with no capabilities
+Wake sender
 
-Attempt access through deleted capability
+Wake receiver
 
-Multiple references
+Prevent lost wake-ups
 
-Object reclamation
+Capability tests
 
-Security tests
+Valid endpoint capability
 
-Forged handles
+Invalid capability
 
-Invalid slots
+Missing Send right
 
-Invalid object types
-
-Rights escalation attempts
+Missing Receive right
 
 Unauthorized transfer
 
-Concurrent operations
+Message tests
 
-33. Formal Specification Goals
+Empty message
 
-Before claiming formal security properties, Aegis Core should define precise specifications for:
+Normal message
 
-Capability state
-Capability derivation
-Rights
+Maximum message
+
+Oversized message
+
+Invalid buffer
+
+Invalid length
+
+Concurrency tests
+
+Multiple senders
+
+Multiple receivers
+
+Simultaneous send/receive
+
+Endpoint destruction during wait
+
+Capability transfer during concurrent IPC
+
+Security tests
+
+Forged capability
+
+Invalid pointer
+
+Kernel-memory pointer
+
+Rights escalation
+
+Unauthorized endpoint access
+
+35. Verification Goals
+
+The IPC subsystem should eventually have precise specifications for:
+
+Endpoint state
+Message state
+Thread IPC state
+Blocking
+Wake-up
+Send
+Receive
+Call
+Reply
+Notification
+Capability transfer
 Object lifetime
-CNode behavior
-Lookup
-Copy
-Move
-Mint
-Delete
-Revoke
-Transfer
+Concurrency
 
-These specifications can later become the basis for formal verification.
+Important properties include:
 
-34. Implementation Order
+No unauthorized communication
+No memory isolation violation
+No lost wake-up
+No invalid thread state
+No use-after-free
+No capability escalation
 
-The capability subsystem should be implemented in stages:
+These properties should be treated as specifications to verify, not assumptions.
 
-1. Define object identifiers
-2. Define capability rights
-3. Define capability representation
-4. Implement capability slots
-5. Implement CNode
-6. Implement lookup
-7. Implement copy
-8. Implement move
-9. Implement delete
-10. Implement restricted derivation/mint
-11. Define derivation tree
-12. Implement revocation
-13. Implement capability transfer
-14. Integrate with IPC
-15. Integrate with memory
-16. Integrate with threads
-17. Add concurrency support
-18. Add extensive security tests
-19. Write formal invariants
-20. Begin verification work
+36. Implementation Order
 
-No advanced revocation or SMP mechanism should be considered complete until its invariants are clearly defined and tested.
+IPC should be implemented in controlled stages:
 
-35. Design Rule
+1. Define IPC message format
+2. Define endpoint object
+3. Define endpoint rights
+4. Implement send
+5. Implement receive
+6. Implement blocking
+7. Implement wake-up
+8. Implement call
+9. Implement reply
+10. Implement notifications
+11. Integrate capability lookup
+12. Implement capability transfer
+13. Integrate memory validation
+14. Integrate scheduler
+15. Add timeouts
+16. Add cancellation
+17. Add shared-memory mechanisms
+18. Add SMP support
+19. Add security tests
+20. Define formal IPC invariants
+21. Begin verification work
 
-The central rule of the Aegis Core capability system is:
+Do not add advanced features before the basic IPC state machine is stable.
 
-No authority without an explicit capability.
+37. Design Rule
 
-Capabilities should be the foundation connecting:
+The central IPC rule of Aegis Core is:
 
-Objects
-   │
-   ▼
-Authority
-   │
-   ▼
-Rights
-   │
-   ▼
-Operations
+Communication is an explicit capability-controlled operation between isolated components.
 
-This provides the security foundation required for strong isolation throughout Altis OS.
+The kernel should provide the smallest practical IPC mechanism while keeping protocol logic, services, and application-level communication in userspace.

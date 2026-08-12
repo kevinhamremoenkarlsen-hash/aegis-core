@@ -1,13 +1,14 @@
-Aegis Core — Architecture Overview
+# Aegis Core — Architecture Overview
 
-Purpose
+## Purpose
 
-Aegis Core is the security-critical microkernel of Altis OS. It is a Rust-based x86_64 microkernel designed around minimal privileged code, capability-based security, strong isolation, explicit IPC, and verification-oriented development.
+Aegis Core is the security-critical microkernel of Altis OS. It is a Rust-based `x86_64` microkernel designed around minimal privileged code, capability-based security, strong isolation, explicit IPC, and verification-oriented development.
 
-Aegis Core is inspired by seL4's architectural principles, but it is an independent implementation and does not inherit seL4's formal verification guarantees.
+Aegis Core is inspired by seL4's architectural principles, but it is an independent implementation and does **not** inherit seL4's formal verification guarantees.
 
-High-Level Architecture
+## High-Level Architecture
 
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                         ALTIS OS                        │
 │                                                         │
@@ -33,39 +34,31 @@ High-Level Architecture
 │                         ▼                               │
 │                      Hardware                          │
 └─────────────────────────────────────────────────────────┘
+```
 
 The kernel is the primary security boundary. Most operating-system functionality should remain outside the kernel.
 
-Core Responsibilities
+## Core Responsibilities
 
 Aegis Core should provide only mechanisms that require kernel privilege:
 
-CPU and architecture primitives
-
-Exceptions and interrupts
-
-Threads and context switching
-
-Scheduling
-
-Address spaces
-
-Memory primitives
-
-Kernel objects
-
-Capability management
-
-IPC
-
-System calls
-
-Security enforcement
+- CPU and architecture primitives
+- Exceptions and interrupts
+- Threads and context switching
+- Scheduling
+- Address spaces
+- Memory primitives
+- Kernel objects
+- Capability management
+- IPC
+- System calls
+- Security enforcement
 
 High-level functionality such as filesystems, networking, GUI, audio, and most drivers should run in userspace whenever practical.
 
-Core Subsystems
+## Core Subsystems
 
+```text
 AEGIS CORE
 ├── arch/          CPU-specific implementation
 ├── boot/          Boot information and initialization
@@ -79,22 +72,26 @@ AEGIS CORE
 ├── security/      Isolation and security invariants
 ├── sync/          Kernel synchronization primitives
 └── debug/         Serial/debug facilities
+```
 
-Capability Architecture
+## Capability Architecture
 
 Capabilities represent authority to operate on kernel objects.
 
+```text
 Process
    │
    ├── Capability → Endpoint
    ├── Capability → Frame
    ├── Capability → Thread
    └── Capability → IRQ
+```
 
 A process must not be able to manufacture authority that has not been explicitly granted.
 
 Planned capability operations include:
 
+```text
 Create
 Copy
 Move
@@ -103,13 +100,15 @@ Lookup
 Delete
 Revoke
 Derive
+```
 
 The exact semantics must be specified before implementation.
 
-Kernel Objects
+## Kernel Objects
 
 Initial object types:
 
+```text
 TCB
 CNode
 Endpoint
@@ -119,25 +118,22 @@ VSpace
 IRQ
 Reply
 Untyped / Memory Object
+```
 
 Every object requires defined:
 
-Lifetime
+- Lifetime
+- Ownership
+- Valid states
+- Access rights
+- Allowed operations
+- Security invariants
 
-Ownership
-
-Valid states
-
-Access rights
-
-Allowed operations
-
-Security invariants
-
-Memory Architecture
+## Memory Architecture
 
 Each isolated process should have its own virtual address space.
 
+```text
 Physical RAM
      │
      ▼
@@ -151,51 +147,51 @@ Page Tables
 Address Space A   Address Space B
      │               │
 Process A         Process B
+```
 
 Memory operations should include:
 
-Physical frame ownership
-
-Mapping
-
-Unmapping
-
-Permission control
-
-Address-space creation
-
-Address-space destruction
-
-Controlled memory sharing
+- Physical frame ownership
+- Mapping
+- Unmapping
+- Permission control
+- Address-space creation
+- Address-space destruction
+- Controlled memory sharing
 
 High-level allocation policy can be implemented by userspace services.
 
-Threads and Scheduler
+## Threads and Scheduler
 
 A thread is represented by a Thread Control Block (TCB).
 
+```text
 TCB
 ├── CPU context
 ├── Address-space reference
 ├── Scheduling state
 ├── Priority
 └── IPC state
+```
 
 Initial states:
 
+```text
 Running
 Ready
 Blocked
 Suspended
 Inactive
 Terminated
+```
 
 The scheduler should eventually support priorities, ready queues, blocking, unblocking, timer preemption, context switching, and eventually SMP.
 
-IPC
+## IPC
 
 IPC is the primary communication mechanism between isolated components.
 
+```text
 Process A
     │
     │ Send
@@ -205,9 +201,11 @@ Process A
     │ Receive
     ▼
 Process B
+```
 
 Initial IPC primitives:
 
+```text
 Send
 Receive
 Reply
@@ -215,11 +213,13 @@ Notify
 Block
 Unblock
 Capability transfer
+```
 
 The kernel provides the mechanism; userspace defines higher-level protocols.
 
-Interrupt Architecture
+## Interrupt Architecture
 
+```text
 Hardware
     │
     ▼
@@ -233,13 +233,15 @@ IRQ Object
     │
     ▼
 Authorized Userspace Component
+```
 
 The kernel controls which component is authorized to receive an interrupt. Drivers should run in userspace whenever the platform permits it.
 
-System Calls
+## System Calls
 
 The syscall surface should remain small.
 
+```text
 Syscalls
 ├── Capability
 ├── IPC
@@ -247,9 +249,11 @@ Syscalls
 ├── Memory
 ├── Interrupt
 └── Debug
+```
 
 Every syscall must validate both inputs and authority.
 
+```text
 Userspace
    │
    ▼
@@ -266,39 +270,36 @@ Kernel Operation
    │
    ▼
 Return
+```
 
 High-level operations such as opening files or making network requests should normally be userspace operations.
 
-Architecture Layer
+## Architecture Layer
 
 The current architecture target is:
 
+```text
 x86_64
+```
 
 Architecture-specific code should be isolated from generic kernel mechanisms.
 
 It handles:
 
-CPU setup
-
-Registers
-
-GDT/IDT
-
-Exceptions
-
-Interrupt entry
-
-Paging primitives
-
-Context switching
-
-CPU-specific instructions
+- CPU setup
+- Registers
+- GDT/IDT
+- Exceptions
+- Interrupt entry
+- Paging primitives
+- Context switching
+- CPU-specific instructions
 
 This separation leaves room for future architectures.
 
-Boot Flow
+## Boot Flow
 
+```text
 Firmware
    │
    ▼
@@ -321,11 +322,13 @@ Initial Userspace
    │
    ▼
 Scheduler
+```
 
 The current project generates a BIOS image and successfully boots in QEMU.
 
-Planned Initialization Order
+## Planned Initialization Order
 
+```text
 1. Enter kernel
 2. Validate boot information
 3. Initialize architecture
@@ -341,65 +344,62 @@ Planned Initialization Order
 13. Create initial userspace
 14. Start initial userspace
 15. Enter scheduler
+```
 
 The exact order may change during implementation.
 
-Security Model
+## Security Model
 
 The central security rule is:
 
-Authority must be explicit.
+> Authority must be explicit.
 
 Important properties:
 
-Least privilege
+### Least privilege
 
 Components receive only the authority they require.
 
-Memory isolation
+### Memory isolation
 
 A process cannot access memory outside its authorized mappings.
 
-Capability integrity
+### Capability integrity
 
 A process cannot fabricate valid authority for an object it has not been granted.
 
-IPC authority
+### IPC authority
 
 Communication requires the necessary capability.
 
-Fault isolation
+### Fault isolation
 
 A userspace failure should not automatically compromise unrelated components.
 
-Small trusted computing base
+### Small trusted computing base
 
 Privileged code should remain as small and auditable as practical.
 
-Verification-Oriented Design
+## Verification-Oriented Design
 
 The architecture should make future formal verification practical.
 
 Important invariants include:
 
-Memory isolation
-
-Capability integrity
-
-IPC authorization
-
-Valid thread scheduling
-
-Kernel object lifetime
-
-Preservation of kernel state invariants
+- Memory isolation
+- Capability integrity
+- IPC authorization
+- Valid thread scheduling
+- Kernel object lifetime
+- Preservation of kernel state invariants
 
 These are design goals until they are converted into precise specifications and actually verified.
 
-Userspace Architecture
+## Userspace Architecture
 
 A future minimal userspace environment may look like:
 
+```text
                     Aegis Core
                          │
                          ▼
@@ -414,13 +414,15 @@ A future minimal userspace environment may look like:
                          │
                          ▼
                     Applications
+```
 
 Services communicate using IPC and capabilities rather than unrestricted shared kernel state.
 
-Dependency Direction
+## Dependency Direction
 
 The preferred dependency direction is:
 
+```text
 Application
      ↓
 Userspace Service
@@ -432,13 +434,15 @@ Aegis Core
 Architecture Layer
      ↓
 Hardware
+```
 
 Higher layers should not bypass lower-layer security mechanisms.
 
-Development Strategy
+## Development Strategy
 
 Implementation should proceed in small milestones:
 
+```text
 Boot
   ↓
 CPU initialization
@@ -464,11 +468,13 @@ Isolation
 Initial userspace
   ↓
 Userspace services
+```
 
 Each stage should be tested before substantial complexity is added.
 
-Current State
+## Current State
 
+```text
 Kernel language       Rust
 Kernel type           Microkernel
 Architecture          x86_64
@@ -479,39 +485,37 @@ no_std                Yes
 QEMU boot             Working
 Serial output         Working
 Kernel entry          Working
+```
 
 Current milestone:
 
-M0 — Boot complete
+**M0 — Boot complete**
 
 Next milestone:
 
-M1 — CPU Initialization
+**M1 — CPU Initialization**
 
-Relationship to seL4
+## Relationship to seL4
 
 Aegis Core is architecturally inspired by seL4, especially:
 
-Capability-based security
-
-Microkernel design
-
-Explicit IPC
-
-Strong isolation
-
-Small trusted computing base
-
-Verification-oriented development
+- Capability-based security
+- Microkernel design
+- Explicit IPC
+- Strong isolation
+- Small trusted computing base
+- Verification-oriented development
 
 However:
 
+```text
 Aegis Core ≠ seL4
+```
 
 Aegis Core is independently implemented. No seL4 formal-security guarantee should be attributed to Aegis Core unless it has independently been demonstrated.
 
-Architectural Rule
+## Architectural Rule
 
-Keep the kernel small, keep authority explicit, and move everything that does not require kernel privilege into isolated userspace.
+> Keep the kernel small, keep authority explicit, and move everything that does not require kernel privilege into isolated userspace.
 
 This rule should guide future architecture and implementation decisions.

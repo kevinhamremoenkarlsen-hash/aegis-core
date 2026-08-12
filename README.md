@@ -2,7 +2,7 @@
 
 > The security-critical microkernel core of Altis OS.
 
-Aegis Core is a Rust-based, `x86_64` microkernel designed for **Altis OS**. Its architecture is inspired by the principles behind **seL4**: a minimal privileged kernel, capability-based access control, strong isolation, explicit IPC, and a design suitable for rigorous security analysis and future formal verification.
+Aegis Core is a Rust-based, `x86_64` and `ARM64`microkernel designed for **Altis OS**. Its architecture is inspired by the principles behind **seL4**: a minimal privileged kernel, capability-based access control, strong isolation, explicit IPC, and a design suitable for rigorous security analysis and future formal verification.
 
 Aegis Core is **not seL4** and does not inherit seL4's formal verification guarantees. It is an independent kernel that uses similar architectural principles.
 
